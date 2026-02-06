@@ -158,9 +158,9 @@ function showWelcome() {
 }
 
 function updateWelcomeScores() {
-    const games = ['recall', 'vision'];
-    const names = { recall: 'Position Recall', vision: '3D Vision' };
-    const icons = { recall: 'O', vision: '^' };
+    const games = ['recall', 'vision', 'siuuu'];
+    const names = { recall: 'Position Recall', vision: '3D Vision', siuuu: 'SIUUU!' };
+    const icons = { recall: 'O', vision: '^', siuuu: 'CR7' };
 
     let html = '';
     let hasScores = false;
@@ -1039,6 +1039,439 @@ function showVisionResults() {
     setTimeout(nextRound, 2500);
 }
 
+// ============ SIUUU CELEBRATION GAME ============
+
+let siuuuState = {
+    phase: 'ready',     // ready, jumping, spinning, landing, siuuu, done, fail
+    timing: 0,
+    playerY: 0,
+    playerRotation: 0,
+    targetTime: 0,
+    scores: { jump: 0, spin: 0, land: 0, siuuu: 0 },
+    animationId: null
+};
+
+// Audio context for SIUUU sound
+let audioCtx = null;
+
+function playSiuuuSound() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    // Create a "SIUUU" sound effect
+    const duration = 1.2;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    // Start high, sweep down then up - like "SIUUUUU!"
+    osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+    osc.frequency.linearRampToValueAtTime(400, audioCtx.currentTime + 0.2);
+    osc.frequency.linearRampToValueAtTime(800, audioCtx.currentTime + 0.8);
+    osc.frequency.linearRampToValueAtTime(600, audioCtx.currentTime + duration);
+
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.4, audioCtx.currentTime + 0.3);
+    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + duration);
+
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+}
+
+function playFailSound() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+    osc.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 0.4);
+
+    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.4);
+
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.5);
+}
+
+function setupSiuuuGame() {
+    siuuuState = {
+        phase: 'ready',
+        timing: 0,
+        playerY: 0,
+        playerRotation: 0,
+        targetTime: 0,
+        scores: { jump: 0, spin: 0, land: 0, siuuu: 0 },
+        animationId: null,
+        hitTimes: []
+    };
+
+    gamePhase = 'playing';
+    drawSiuuuScene();
+
+    showMessage('Tap at the right moment! Get ready...');
+
+    // Start the sequence after a delay
+    setTimeout(() => {
+        if (!gameActive) return;
+        startSiuuuSequence();
+    }, 1500);
+
+    canvas.onclick = handleSiuuuTap;
+}
+
+function startSiuuuSequence() {
+    siuuuState.phase = 'jumping';
+    siuuuState.timing = 0;
+    siuuuState.targetTime = 30;  // Frames to hit jump
+    showMessage('TAP to JUMP!');
+    animateSiuuu();
+}
+
+function handleSiuuuTap() {
+    if (!gameActive || siuuuState.phase === 'ready' || siuuuState.phase === 'done' || siuuuState.phase === 'fail') return;
+
+    const timing = siuuuState.timing;
+    const target = siuuuState.targetTime;
+    const accuracy = Math.max(0, 1 - Math.abs(timing - target) / 20);
+
+    if (siuuuState.phase === 'jumping') {
+        siuuuState.scores.jump = Math.floor(accuracy * 100);
+        if (accuracy > 0.3) {
+            siuuuState.phase = 'spinning';
+            siuuuState.timing = 0;
+            siuuuState.targetTime = 40;
+            showMessage('TAP to SPIN!');
+        } else {
+            failSiuuu('jump');
+        }
+    } else if (siuuuState.phase === 'spinning') {
+        siuuuState.scores.spin = Math.floor(accuracy * 100);
+        if (accuracy > 0.3) {
+            siuuuState.phase = 'landing';
+            siuuuState.timing = 0;
+            siuuuState.targetTime = 35;
+            showMessage('TAP to LAND!');
+        } else {
+            failSiuuu('spin');
+        }
+    } else if (siuuuState.phase === 'landing') {
+        siuuuState.scores.land = Math.floor(accuracy * 100);
+        if (accuracy > 0.3) {
+            siuuuState.phase = 'siuuu';
+            siuuuState.timing = 0;
+            siuuuState.targetTime = 25;
+            showMessage('TAP for SIUUUUU!');
+        } else {
+            failSiuuu('land');
+        }
+    } else if (siuuuState.phase === 'siuuu') {
+        siuuuState.scores.siuuu = Math.floor(accuracy * 100);
+        if (accuracy > 0.2) {
+            successSiuuu();
+        } else {
+            failSiuuu('siuuu');
+        }
+    }
+}
+
+function failSiuuu(phase) {
+    siuuuState.phase = 'fail';
+    siuuuState.failType = phase;
+    playFailSound();
+    showMessage(getFailMessage(phase));
+
+    setTimeout(() => {
+        finishSiuuuRound();
+    }, 2000);
+}
+
+function getFailMessage(phase) {
+    const messages = {
+        jump: ['Oof! Tripped on the grass!', 'Jumped too early!', 'Legs got tangled!'],
+        spin: ['Dizzy disaster!', 'Spin malfunction!', 'Lost balance mid-air!'],
+        land: ['Faceplant!', 'Wobbly landing!', 'Knees gave out!'],
+        siuuu: ['Voice crack!', 'Forgot the words!', 'Too quiet!']
+    };
+    const opts = messages[phase];
+    return opts[Math.floor(Math.random() * opts.length)];
+}
+
+function successSiuuu() {
+    siuuuState.phase = 'done';
+    playSiuuuSound();
+    showMessage('SIUUUUUU! Perfect!');
+
+    setTimeout(() => {
+        finishSiuuuRound();
+    }, 2000);
+}
+
+function finishSiuuuRound() {
+    canvas.onclick = null;
+    if (siuuuState.animationId) {
+        cancelAnimationFrame(siuuuState.animationId);
+    }
+
+    const totalScore = siuuuState.scores.jump + siuuuState.scores.spin +
+                       siuuuState.scores.land + siuuuState.scores.siuuu;
+    score += totalScore;
+    updateScore();
+
+    showMessage(`Round score: +${totalScore}`);
+    setTimeout(nextRound, 1500);
+}
+
+function animateSiuuu() {
+    if (!gameActive) return;
+
+    siuuuState.timing++;
+    drawSiuuuScene();
+
+    // Auto-fail if timing runs out
+    if (siuuuState.timing > siuuuState.targetTime + 30) {
+        if (siuuuState.phase !== 'done' && siuuuState.phase !== 'fail') {
+            failSiuuu(siuuuState.phase);
+            return;
+        }
+    }
+
+    if (siuuuState.phase !== 'done' && siuuuState.phase !== 'fail') {
+        siuuuState.animationId = requestAnimationFrame(animateSiuuu);
+    } else {
+        // Continue animation for result display
+        drawSiuuuScene();
+    }
+}
+
+function drawSiuuuScene() {
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // Stadium background
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
+    bgGrad.addColorStop(0, '#1a1a2e');
+    bgGrad.addColorStop(0.4, '#16213e');
+    bgGrad.addColorStop(1, '#1a5c2e');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Crowd (simple dots)
+    ctx.fillStyle = 'rgba(255,200,150,0.3)';
+    for (let i = 0; i < 100; i++) {
+        const x = (i * 37) % w;
+        const y = 20 + (i * 13) % (h * 0.3);
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Field
+    ctx.fillStyle = '#2d8a4e';
+    ctx.fillRect(0, h * 0.65, w, h * 0.35);
+
+    // Draw Ronaldo
+    drawRonaldo(w / 2, h * 0.65);
+
+    // Timing indicator
+    drawTimingBar();
+}
+
+function drawRonaldo(x, groundY) {
+    const state = siuuuState;
+    let y = groundY;
+    let rotation = 0;
+    let armAngle = 0;
+    let scale = 1;
+
+    // Calculate position based on phase
+    if (state.phase === 'jumping' || state.phase === 'spinning' || state.phase === 'landing') {
+        // Jump arc
+        const jumpProgress = Math.min(1, state.timing / 60);
+        const jumpHeight = Math.sin(jumpProgress * Math.PI) * 120;
+        y = groundY - jumpHeight;
+
+        if (state.phase === 'spinning') {
+            rotation = (state.timing / 40) * Math.PI * 2;
+        }
+    } else if (state.phase === 'siuuu' || state.phase === 'done') {
+        // Landed, arms out
+        armAngle = Math.PI * 0.4;
+        y = groundY;
+    } else if (state.phase === 'fail') {
+        // Funny fail pose
+        if (state.failType === 'jump') {
+            y = groundY + 10;
+            rotation = Math.PI * 0.1;
+        } else if (state.failType === 'spin') {
+            rotation = Math.PI * 0.5 + Math.sin(state.timing * 0.3) * 0.3;
+            y = groundY - 20;
+        } else if (state.failType === 'land') {
+            y = groundY + 5;
+            rotation = Math.PI * 0.15;
+            scale = 0.9;
+        } else {
+            armAngle = Math.PI * 0.2;
+        }
+    }
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+    ctx.scale(scale, scale);
+
+    const bodyH = 80;
+    const bodyW = 30;
+
+    // Shadow
+    ctx.beginPath();
+    ctx.ellipse(0, groundY - y + 5, 25, 8, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fill();
+
+    // Legs
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(-12, 0, 10, 35);
+    ctx.fillRect(2, 0, 10, 35);
+
+    // Shorts
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(-15, -5, 30, 15);
+
+    // Torso (CR7 jersey - white with red accents for Portugal feel)
+    ctx.fillStyle = '#c8102e';  // Portugal red
+    ctx.beginPath();
+    ctx.ellipse(0, -30, 18, 25, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Number 7
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('7', 0, -30);
+
+    // Arms
+    ctx.strokeStyle = '#f0c8b8';
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+
+    // Left arm
+    ctx.save();
+    ctx.translate(-18, -35);
+    ctx.rotate(-Math.PI * 0.3 - armAngle);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, 30);
+    ctx.stroke();
+    ctx.restore();
+
+    // Right arm
+    ctx.save();
+    ctx.translate(18, -35);
+    ctx.rotate(Math.PI * 0.3 + armAngle);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, 30);
+    ctx.stroke();
+    ctx.restore();
+
+    // Head
+    ctx.beginPath();
+    ctx.arc(0, -60, 15, 0, Math.PI * 2);
+    ctx.fillStyle = '#f0c8b8';
+    ctx.fill();
+
+    // Hair (short, dark)
+    ctx.fillStyle = '#2a1a0a';
+    ctx.beginPath();
+    ctx.arc(0, -65, 13, Math.PI, 0, false);
+    ctx.fill();
+
+    // Face expression
+    if (state.phase === 'done' || state.phase === 'siuuu') {
+        // Happy/shouting
+        ctx.fillStyle = '#2a1a0a';
+        ctx.beginPath();
+        ctx.arc(-5, -62, 2, 0, Math.PI * 2);
+        ctx.arc(5, -62, 2, 0, Math.PI * 2);
+        ctx.fill();
+        // Open mouth (shouting SIUUU)
+        ctx.beginPath();
+        ctx.arc(0, -55, 6, 0, Math.PI);
+        ctx.fillStyle = '#8b0000';
+        ctx.fill();
+    } else if (state.phase === 'fail') {
+        // Dizzy/sad
+        ctx.fillStyle = '#2a1a0a';
+        ctx.font = '12px Arial';
+        ctx.fillText('X X', 0, -62);
+        ctx.beginPath();
+        ctx.arc(0, -54, 4, 0.2 * Math.PI, 0.8 * Math.PI);
+        ctx.strokeStyle = '#2a1a0a';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    } else {
+        // Focused
+        ctx.fillStyle = '#2a1a0a';
+        ctx.beginPath();
+        ctx.arc(-5, -62, 2, 0, Math.PI * 2);
+        ctx.arc(5, -62, 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    ctx.restore();
+
+    // SIUUU text effect when celebrating
+    if (state.phase === 'done') {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 36px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('SIUUUUU!', x, y - 130);
+    }
+}
+
+function drawTimingBar() {
+    const w = canvas.width;
+    const h = canvas.height;
+    const state = siuuuState;
+
+    if (state.phase === 'done' || state.phase === 'fail' || state.phase === 'ready') return;
+
+    const barW = w * 0.7;
+    const barH = 20;
+    const barX = (w - barW) / 2;
+    const barY = h - 60;
+
+    // Bar background
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(barX, barY, barW, barH);
+
+    // Target zone (green area)
+    const targetX = barX + (state.targetTime / 70) * barW;
+    ctx.fillStyle = 'rgba(76, 175, 80, 0.7)';
+    ctx.fillRect(targetX - 15, barY, 30, barH);
+
+    // Moving indicator
+    const indicatorX = barX + (state.timing / 70) * barW;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(indicatorX - 3, barY - 5, 6, barH + 10);
+
+    // Phase label
+    const labels = { jumping: 'JUMP!', spinning: 'SPIN!', landing: 'LAND!', siuuu: 'SIUUUU!' };
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(labels[state.phase] || '', w / 2, barY - 15);
+}
+
 // ============ GAME FLOW ============
 
 function startGame(type) {
@@ -1072,6 +1505,9 @@ function nextRound() {
             break;
         case 'vision':
             setupVisionGame();
+            break;
+        case 'siuuu':
+            setupSiuuuGame();
             break;
     }
 }
@@ -1140,8 +1576,8 @@ function updatePlacementCount() {
 }
 
 function updateHighScores() {
-    const games = ['recall', 'vision'];
-    const names = { recall: 'Position Recall', vision: '3D Vision' };
+    const games = ['recall', 'vision', 'siuuu'];
+    const names = { recall: 'Position Recall', vision: '3D Vision', siuuu: 'SIUUU!' };
 
     let html = '';
     for (const g of games) {
