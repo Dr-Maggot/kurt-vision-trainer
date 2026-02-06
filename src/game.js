@@ -316,101 +316,82 @@ function drawGhostPlayer(x, y, team) {
 
 // ============ 3D FIRST-PERSON RENDERING ============
 
-// Striker/Midfielder starting positions (normalized 0-1 coordinates)
+// Striker/Midfielder starting positions
+// x, y are normalized 0-1 on field, lookY is where they look (0=top of field, 1=bottom)
 const PLAYER_POSITIONS = [
-    // Attacking positions - looking toward goal
-    { x: 0.5, y: 0.7, angle: -Math.PI/2, name: 'Central striker' },
-    { x: 0.3, y: 0.65, angle: -Math.PI/2.5, name: 'Left wing' },
-    { x: 0.7, y: 0.65, angle: -Math.PI/1.7, name: 'Right wing' },
-    { x: 0.5, y: 0.55, angle: -Math.PI/2, name: 'Attacking mid' },
-    { x: 0.35, y: 0.5, angle: -Math.PI/2.2, name: 'Left mid' },
-    { x: 0.65, y: 0.5, angle: -Math.PI/1.8, name: 'Right mid' },
-    // Edge of box positions
-    { x: 0.4, y: 0.75, angle: -Math.PI/2.3, name: 'Left edge of box' },
-    { x: 0.6, y: 0.75, angle: -Math.PI/1.7, name: 'Right edge of box' },
-    // Counter attack positions
-    { x: 0.5, y: 0.4, angle: -Math.PI/2, name: 'Center circle' },
+    { x: 0.5, y: 0.65, lookY: 0.1, name: 'Central striker' },
+    { x: 0.3, y: 0.6, lookY: 0.15, name: 'Left wing' },
+    { x: 0.7, y: 0.6, lookY: 0.15, name: 'Right wing' },
+    { x: 0.5, y: 0.5, lookY: 0.1, name: 'Attacking mid' },
+    { x: 0.35, y: 0.45, lookY: 0.1, name: 'Left mid' },
+    { x: 0.65, y: 0.45, lookY: 0.1, name: 'Right mid' },
+    { x: 0.4, y: 0.7, lookY: 0.2, name: 'Left edge of box' },
+    { x: 0.6, y: 0.7, lookY: 0.2, name: 'Right edge of box' },
+    { x: 0.5, y: 0.35, lookY: 0.05, name: 'Center circle' },
 ];
 
 function draw3DView() {
     const w = canvas.width;
     const h = canvas.height;
+    const horizon = h * 0.35;
 
-    // Eye-level horizon (higher = more ground-level view)
-    const horizon = h * 0.33;
-
-    // Sky gradient
+    // Sky
     const skyGrad = ctx.createLinearGradient(0, 0, 0, horizon);
     skyGrad.addColorStop(0, '#4a90d9');
-    skyGrad.addColorStop(1, '#a8d4f0');
+    skyGrad.addColorStop(1, '#87CEEB');
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, w, horizon);
 
-    // Grass with perspective - darker far, lighter near
+    // Grass
     const grassGrad = ctx.createLinearGradient(0, horizon, 0, h);
     grassGrad.addColorStop(0, '#1a5c2e');
-    grassGrad.addColorStop(0.5, '#2d8a4e');
+    grassGrad.addColorStop(0.4, '#2d8a4e');
     grassGrad.addColorStop(1, '#3da55d');
     ctx.fillStyle = grassGrad;
     ctx.fillRect(0, horizon, w, h - horizon);
 
-    // Draw 3D field lines
+    // Draw field lines
     draw3DFieldLines();
 
-    // Draw players sorted by distance (far to near)
-    const sortedPlayers = [...actualPlayers].map(p => {
-        const rel = getRelativePosition(p.x, p.y);
-        return { ...p, depth: rel.depth };
-    }).filter(p => p.depth > 0).sort((a, b) => b.depth - a.depth);
+    // Draw players (sorted far to near)
+    const playersWithDepth = actualPlayers.map(p => {
+        const screen = worldTo3DScreen(p.x, p.y);
+        return { ...p, screen };
+    }).filter(p => p.screen.valid).sort((a, b) => b.screen.depth - a.screen.depth);
 
-    for (const player of sortedPlayers) {
+    for (const player of playersWithDepth) {
         draw3DPlayer(player);
     }
 }
 
-// Convert world position to position relative to viewer's view direction
-function getRelativePosition(worldX, worldY) {
-    // Translate to viewer-relative coordinates
-    const dx = worldX - viewerPosition.x;
-    const dy = worldY - viewerPosition.y;
-
-    // Rotate by viewer angle (so viewer looks "forward" along positive Y in view space)
-    const cos = Math.cos(-viewerAngle);
-    const sin = Math.sin(-viewerAngle);
-
-    const relX = dx * cos - dy * sin;  // Left/right from viewer
-    const relY = dx * sin + dy * cos;  // Forward/back from viewer (positive = in front)
-
-    return { x: relX, y: relY, depth: relY };
-}
-
-// Project 3D world coordinates to screen coordinates
 function worldTo3DScreen(worldX, worldY) {
     const w = canvas.width;
     const h = canvas.height;
-    const horizon = h * 0.33;
+    const horizon = h * 0.35;
 
-    const rel = getRelativePosition(worldX, worldY);
+    // Vector from viewer to point
+    const dx = worldX - viewerPosition.x;
+    const dy = worldY - viewerPosition.y;
 
-    // If behind viewer, return invalid
-    if (rel.y <= 5) {
-        return { x: 0, y: 0, valid: false, size: 0, depth: rel.y };
+    // Distance forward (toward where viewer is looking = negative Y direction in canvas)
+    // viewerAngle represents the Y coordinate the viewer is looking at
+    // "Forward" means toward lower Y values (toward goal at top)
+    const forward = viewerPosition.y - worldY;  // Positive = in front of viewer
+    const right = worldX - viewerPosition.x;     // Positive = to the right
+
+    if (forward < 10) {
+        return { x: 0, y: 0, valid: false, size: 0, depth: forward };
     }
 
     // Perspective projection
-    const fov = 1.2; // Field of view factor
-    const eyeHeight = 50; // Simulated eye height in world units
+    const focalLength = 250;
+    const screenX = w / 2 + (right / forward) * focalLength;
+    const screenY = horizon + (40 / forward) * focalLength;  // 40 = eye height feel
 
-    // Screen X: left-right position based on angle
-    const screenX = w / 2 + (rel.x / rel.y) * w * fov;
+    // Size based on distance
+    const size = Math.max(8, 200 / forward);
 
-    // Screen Y: vertical position based on depth and eye height
-    const groundY = horizon + (eyeHeight / rel.y) * h * 1.5;
-
-    // Size scaling based on distance
-    const size = Math.max(5, 300 / rel.y);
-
-    return { x: screenX, y: groundY, valid: true, size, depth: rel.y };
+    return { x: screenX, y: screenY, valid: true, size, depth: forward };
 }
 
 function draw3DFieldLines() {
@@ -418,7 +399,6 @@ function draw3DFieldLines() {
     const h = canvas.height;
     const margin = 15;
 
-    // Field boundaries in 2D canvas coordinates
     const fieldLeft = margin;
     const fieldRight = w - margin;
     const fieldTop = margin;
@@ -428,62 +408,43 @@ function draw3DFieldLines() {
     const centerX = w / 2;
     const centerY = h / 2;
 
-    // Penalty area dimensions
     const penaltyW = fieldWidth * 0.16;
     const penaltyH = fieldHeight * 0.45;
     const penaltyTop = (h - penaltyH) / 2;
     const penaltyBottom = penaltyTop + penaltyH;
 
-    // Goal area (6-yard box)
-    const goalW = penaltyW * 0.4;
-    const goalH = penaltyH * 0.5;
-    const goalTop = (h - goalH) / 2;
-    const goalBottom = goalTop + goalH;
-
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    // Helper to draw a 3D line with depth-based thickness
-    function draw3DLine(x1, y1, x2, y2, color = 'rgba(255,255,255,0.8)') {
+    function draw3DLine(x1, y1, x2, y2) {
         const p1 = worldTo3DScreen(x1, y1);
         const p2 = worldTo3DScreen(x2, y2);
 
-        if (!p1.valid && !p2.valid) return;
+        if (!p1.valid || !p2.valid) return;
 
-        // Clip lines that go behind the viewer
-        let startP = p1, endP = p2;
-        if (!p1.valid) startP = p2;
-        if (!p2.valid) endP = p1;
-
-        if (!startP.valid || !endP.valid) {
-            // One point behind - need to interpolate
-            return;
-        }
-
-        ctx.strokeStyle = color;
-        ctx.lineWidth = Math.max(1, 4 - Math.min(p1.depth, p2.depth) / 80);
+        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+        ctx.lineWidth = Math.max(1.5, 5 - Math.min(p1.depth, p2.depth) / 50);
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
         ctx.stroke();
     }
 
-    // Helper for drawing circles/arcs
-    function draw3DCircle(cx, cy, radius, startAngle = 0, endAngle = Math.PI * 2) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    function draw3DCircle(cx, cy, radius) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
         ctx.beginPath();
-        let first = true;
+        let started = false;
 
-        for (let angle = startAngle; angle <= endAngle; angle += Math.PI / 24) {
-            const px = cx + Math.cos(angle) * radius;
-            const py = cy + Math.sin(angle) * radius;
+        for (let a = 0; a <= Math.PI * 2 + 0.1; a += Math.PI / 20) {
+            const px = cx + Math.cos(a) * radius;
+            const py = cy + Math.sin(a) * radius;
             const p = worldTo3DScreen(px, py);
 
             if (p.valid) {
-                ctx.lineWidth = Math.max(1, 4 - p.depth / 80);
-                if (first) {
+                ctx.lineWidth = Math.max(1.5, 5 - p.depth / 50);
+                if (!started) {
                     ctx.moveTo(p.x, p.y);
-                    first = false;
+                    started = true;
                 } else {
                     ctx.lineTo(p.x, p.y);
                 }
@@ -492,51 +453,34 @@ function draw3DFieldLines() {
         ctx.stroke();
     }
 
-    // Draw field outline
-    draw3DLine(fieldLeft, fieldTop, fieldRight, fieldTop);      // Top line
-    draw3DLine(fieldRight, fieldTop, fieldRight, fieldBottom);  // Right line
-    draw3DLine(fieldRight, fieldBottom, fieldLeft, fieldBottom);// Bottom line
-    draw3DLine(fieldLeft, fieldBottom, fieldLeft, fieldTop);    // Left line
+    // Field boundary
+    draw3DLine(fieldLeft, fieldTop, fieldRight, fieldTop);
+    draw3DLine(fieldRight, fieldTop, fieldRight, fieldBottom);
+    draw3DLine(fieldRight, fieldBottom, fieldLeft, fieldBottom);
+    draw3DLine(fieldLeft, fieldBottom, fieldLeft, fieldTop);
 
-    // Center line
+    // Center line (horizontal)
     draw3DLine(fieldLeft, centerY, fieldRight, centerY);
 
     // Center circle
     const centerRadius = Math.min(fieldWidth, fieldHeight) * 0.12;
     draw3DCircle(centerX, centerY, centerRadius);
 
-    // Center spot
-    draw3DCircle(centerX, centerY, 3);
-
-    // LEFT penalty area (top goal in 2D = left goal in oriented view)
+    // Left penalty area (goal at top-left)
     draw3DLine(fieldLeft, penaltyTop, fieldLeft + penaltyW, penaltyTop);
     draw3DLine(fieldLeft + penaltyW, penaltyTop, fieldLeft + penaltyW, penaltyBottom);
     draw3DLine(fieldLeft + penaltyW, penaltyBottom, fieldLeft, penaltyBottom);
 
-    // Left goal area
-    draw3DLine(fieldLeft, goalTop, fieldLeft + goalW, goalTop);
-    draw3DLine(fieldLeft + goalW, goalTop, fieldLeft + goalW, goalBottom);
-    draw3DLine(fieldLeft + goalW, goalBottom, fieldLeft, goalBottom);
-
-    // RIGHT penalty area
+    // Right penalty area
     draw3DLine(fieldRight, penaltyTop, fieldRight - penaltyW, penaltyTop);
     draw3DLine(fieldRight - penaltyW, penaltyTop, fieldRight - penaltyW, penaltyBottom);
     draw3DLine(fieldRight - penaltyW, penaltyBottom, fieldRight, penaltyBottom);
 
-    // Right goal area
-    draw3DLine(fieldRight, goalTop, fieldRight - goalW, goalTop);
-    draw3DLine(fieldRight - goalW, goalTop, fieldRight - goalW, goalBottom);
-    draw3DLine(fieldRight - goalW, goalBottom, fieldRight, goalBottom);
-
-    // Penalty spots
-    const penaltySpotDist = penaltyW * 0.7;
-    draw3DCircle(fieldLeft + penaltySpotDist, centerY, 3);
-    draw3DCircle(fieldRight - penaltySpotDist, centerY, 3);
-
-    // Penalty arcs (the D)
-    const arcRadius = centerRadius;
-    draw3DCircle(fieldLeft + penaltySpotDist, centerY, arcRadius, -Math.PI/3, Math.PI/3);
-    draw3DCircle(fieldRight - penaltySpotDist, centerY, arcRadius, Math.PI*2/3, Math.PI*4/3);
+    // Extra depth lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    for (let y = fieldTop + fieldHeight * 0.25; y < fieldBottom; y += fieldHeight * 0.25) {
+        draw3DLine(fieldLeft, y, fieldRight, y);
+    }
 }
 
 function worldTo3DScreen(worldX, worldY) {
@@ -574,71 +518,61 @@ function worldTo3DScreen(worldX, worldY) {
 }
 
 function draw3DPlayer(player) {
-    const screen = worldTo3DScreen(player.x, player.y);
-
-    if (!screen.valid || screen.size < 8) return; // Behind viewer or too small
+    const screen = player.screen;
+    if (!screen || !screen.valid) return;
 
     const x = screen.x;
     const y = screen.y;
     const size = screen.size;
 
-    // Shadow (ellipse on ground)
+    // Shadow
     ctx.beginPath();
-    ctx.ellipse(x, y + size * 0.05, size * 0.4, size * 0.12, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.ellipse(x, y + 2, size * 0.5, size * 0.15, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.fill();
 
-    const bodyHeight = size * 1.8;
-    const bodyWidth = size * 0.6;
+    const bodyHeight = size * 2;
+    const bodyWidth = size * 0.7;
 
-    // Legs (dark shorts/socks)
+    // Legs
     ctx.fillStyle = player.team === 'A' ? '#2a2a2a' : COLORS.teamBDark;
-    const legWidth = bodyWidth * 0.22;
-    const legHeight = bodyHeight * 0.35;
-    ctx.fillRect(x - bodyWidth * 0.25, y - legHeight, legWidth, legHeight);
-    ctx.fillRect(x + bodyWidth * 0.05, y - legHeight, legWidth, legHeight);
+    ctx.fillRect(x - bodyWidth * 0.3, y - bodyHeight * 0.35, bodyWidth * 0.25, bodyHeight * 0.35);
+    ctx.fillRect(x + bodyWidth * 0.05, y - bodyHeight * 0.35, bodyWidth * 0.25, bodyHeight * 0.35);
 
     // Torso (jersey)
     ctx.fillStyle = player.team === 'A' ? COLORS.teamA : COLORS.teamB;
-    const torsoTop = y - bodyHeight * 0.7;
-    const torsoHeight = bodyHeight * 0.38;
     ctx.beginPath();
-    ctx.ellipse(x, torsoTop + torsoHeight/2, bodyWidth * 0.4, torsoHeight/2, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y - bodyHeight * 0.55, bodyWidth * 0.45, bodyHeight * 0.22, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Soleil dark blue collar and sleeve detail
+    // Soleil collar detail
     if (player.team === 'B') {
         ctx.fillStyle = COLORS.teamBDark;
-        // Collar
         ctx.beginPath();
-        ctx.ellipse(x, torsoTop + torsoHeight * 0.15, bodyWidth * 0.2, bodyHeight * 0.05, 0, 0, Math.PI * 2);
+        ctx.ellipse(x, y - bodyHeight * 0.7, bodyWidth * 0.2, bodyHeight * 0.06, 0, 0, Math.PI * 2);
         ctx.fill();
-        // Sleeve stripes
-        ctx.fillRect(x - bodyWidth * 0.45, torsoTop + torsoHeight * 0.2, bodyWidth * 0.12, torsoHeight * 0.4);
-        ctx.fillRect(x + bodyWidth * 0.33, torsoTop + torsoHeight * 0.2, bodyWidth * 0.12, torsoHeight * 0.4);
     }
 
     // Head
-    const headRadius = size * 0.28;
-    const headY = torsoTop - headRadius * 0.5;
+    const headRadius = size * 0.3;
     ctx.beginPath();
-    ctx.arc(x, headY, headRadius, 0, Math.PI * 2);
+    ctx.arc(x, y - bodyHeight * 0.82, headRadius, 0, Math.PI * 2);
     ctx.fillStyle = '#f0c8b8';
     ctx.fill();
 
     // Hair
     ctx.fillStyle = player.team === 'A' ? '#3a2a1a' : '#5a4a3a';
     ctx.beginPath();
-    ctx.arc(x, headY - headRadius * 0.15, headRadius * 0.9, Math.PI, 0, false);
+    ctx.arc(x, y - bodyHeight * 0.85, headRadius * 0.85, Math.PI, 0, false);
     ctx.fill();
 
-    // Jersey number on back
-    if (player.number) {
+    // Jersey number
+    if (player.number && size > 12) {
         ctx.fillStyle = player.team === 'A' ? 'white' : COLORS.teamBDark;
-        ctx.font = `bold ${Math.max(10, size * 0.4)}px Arial`;
+        ctx.font = `bold ${Math.max(10, size * 0.45)}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(player.number.toString(), x, torsoTop + torsoHeight/2);
+        ctx.fillText(player.number.toString(), x, y - bodyHeight * 0.55);
     }
 }
 
@@ -870,24 +804,23 @@ function setupVisionGame() {
     const fieldRight = w - margin;
     const fieldTop = margin;
     const fieldBottom = h - margin;
+    const fieldWidth = fieldRight - fieldLeft;
+    const fieldHeight = fieldBottom - fieldTop;
 
     // Pick a random striker/midfielder position
     const pos = PLAYER_POSITIONS[Math.floor(Math.random() * PLAYER_POSITIONS.length)];
 
     // Convert normalized position to canvas coordinates
     viewerPosition = {
-        x: fieldLeft + pos.x * (fieldRight - fieldLeft),
-        y: fieldTop + pos.y * (fieldBottom - fieldTop)
+        x: fieldLeft + pos.x * fieldWidth,
+        y: fieldTop + pos.y * fieldHeight
     };
-    viewerAngle = pos.angle;
 
-    // Generate players in front of the viewer
+    // Generate players IN FRONT of viewer (toward goal = lower Y values)
     const numPerTeam = 2 + Math.floor(level / 2);
     actualPlayers = [];
+    const minDist = 40;
 
-    const minDist = 45;
-
-    // Generate players that are visible from this position
     for (let i = 0; i < numPerTeam * 2; i++) {
         let attempts = 0;
         let x, y, valid;
@@ -897,17 +830,18 @@ function setupVisionGame() {
         do {
             valid = true;
 
-            // Generate position in view cone (in front of viewer)
-            const distance = 60 + Math.random() * 180; // Distance from viewer
-            const angleSpread = (Math.random() - 0.5) * Math.PI * 0.8; // Spread angle
-            const worldAngle = viewerAngle + Math.PI/2 + angleSpread;
+            // Place players between viewer and the goal (top of field)
+            // Forward distance (toward goal)
+            const forwardDist = 40 + Math.random() * 150;
+            // Side spread
+            const sideSpread = (Math.random() - 0.5) * 200;
 
-            x = viewerPosition.x + Math.cos(worldAngle) * distance;
-            y = viewerPosition.y + Math.sin(worldAngle) * distance;
+            x = viewerPosition.x + sideSpread;
+            y = viewerPosition.y - forwardDist;  // Negative Y = toward goal
 
-            // Keep within field bounds
-            if (x < fieldLeft + 20 || x > fieldRight - 20 ||
-                y < fieldTop + 20 || y > fieldBottom - 20) {
+            // Keep within field
+            if (x < fieldLeft + 25 || x > fieldRight - 25 ||
+                y < fieldTop + 25 || y > viewerPosition.y - 30) {
                 valid = false;
             }
 
@@ -918,10 +852,10 @@ function setupVisionGame() {
             }
 
             attempts++;
-        } while (!valid && attempts < 100);
+        } while (!valid && attempts < 80);
 
-        if (attempts < 100) {
-            actualPlayers.push({ x, y, team, number, placed: false });
+        if (valid) {
+            actualPlayers.push({ x, y, team, number });
         }
     }
 
@@ -931,20 +865,19 @@ function setupVisionGame() {
     // Draw 3D view
     draw3DView();
 
-    // Draw position indicator
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(0, 0, canvas.width, 28);
+    // Position label
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, w, 28);
     ctx.fillStyle = 'white';
     ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(`YOUR VIEW: ${pos.name}`, canvas.width / 2, 18);
+    ctx.fillText(`YOUR VIEW: ${pos.name}`, w / 2, 18);
 
     const numRed = actualPlayers.filter(p => p.team === 'A').length;
     const numBlue = actualPlayers.filter(p => p.team === 'B').length;
-    showMessage(`Study: ${numRed} red, ${numBlue} light blue (Soleil)`);
+    showMessage(`Study: ${numRed} RED, ${numBlue} BLUE (Soleil)`);
     updatePlacementCount();
 
-    // Viewing time
     const viewTime = Math.max(5000 - level * 400, 2500);
 
     setTimeout(() => {
