@@ -331,112 +331,179 @@ const PLAYER_POSITIONS = [
 function draw3DView() {
     const w = canvas.width;
     const h = canvas.height;
-    const horizon = h * 0.35;
+    const horizon = h * 0.30;  // Lower horizon = more ground visible
+    const vanishX = w / 2;
+    const vanishY = horizon;
 
-    // Sky
-    ctx.fillStyle = '#6aaddb';
+    // Sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, horizon);
+    skyGrad.addColorStop(0, '#4a90d9');
+    skyGrad.addColorStop(1, '#87CEEB');
+    ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, w, horizon);
 
-    // Grass
-    ctx.fillStyle = '#2d8a4e';
+    // Grass with perspective shading
+    const grassGrad = ctx.createLinearGradient(0, horizon, 0, h);
+    grassGrad.addColorStop(0, '#1e5c2e');  // Darker at horizon
+    grassGrad.addColorStop(0.5, '#2d8a4e');
+    grassGrad.addColorStop(1, '#3a9d5c');  // Lighter near viewer
+    ctx.fillStyle = grassGrad;
     ctx.fillRect(0, horizon, w, h - horizon);
 
-    // Simple perspective lines
-    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    // Draw proper perspective field lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
     ctx.lineWidth = 2;
 
-    // Sidelines converging to center
+    // Field width at different depths (converging to vanishing point)
+    // Near edge of field (at bottom of screen)
+    const nearWidth = w * 0.9;
+    const nearLeft = (w - nearWidth) / 2;
+    const nearRight = nearLeft + nearWidth;
+    const nearY = h;
+
+    // Far edge (near horizon)
+    const farWidth = w * 0.15;
+    const farLeft = (w - farWidth) / 2;
+    const farRight = farLeft + farWidth;
+    const farY = horizon + 15;
+
+    // Sidelines
     ctx.beginPath();
-    ctx.moveTo(0, h);
-    ctx.lineTo(w / 2, horizon);
-    ctx.moveTo(w, h);
-    ctx.lineTo(w / 2, horizon);
+    ctx.moveTo(nearLeft, nearY);
+    ctx.lineTo(farLeft, farY);
+    ctx.moveTo(nearRight, nearY);
+    ctx.lineTo(farRight, farY);
     ctx.stroke();
 
-    // Horizontal depth lines
-    for (let i = 1; i <= 5; i++) {
-        const t = i / 6;
-        const y = horizon + (h - horizon) * t;
-        const spread = t;
+    // Horizontal lines at perspective depths
+    const depths = [0.15, 0.3, 0.5, 0.7, 0.9];
+    for (const d of depths) {
+        const y = horizon + (h - horizon) * d;
+        const lineWidth = farWidth + (nearWidth - farWidth) * d;
+        const lineLeft = (w - lineWidth) / 2;
+        const lineRight = lineLeft + lineWidth;
+
+        ctx.lineWidth = 1 + d;
         ctx.beginPath();
-        ctx.moveTo(w / 2 - w * 0.5 * spread, y);
-        ctx.lineTo(w / 2 + w * 0.5 * spread, y);
+        ctx.moveTo(lineLeft, y);
+        ctx.lineTo(lineRight, y);
         ctx.stroke();
     }
 
-    // Draw each player directly
-    for (const p of actualPlayers) {
-        draw3DPlayerDirect(p);
-    }
+    // Center line (vertical in perspective)
+    ctx.beginPath();
+    ctx.moveTo(w / 2, nearY);
+    ctx.lineTo(w / 2, farY);
+    ctx.stroke();
 
-    // Debug: show player count
-    ctx.fillStyle = 'white';
-    ctx.font = '12px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText(`Players: ${actualPlayers.length}`, 10, h - 10);
+    // Penalty box (near end - goal we're attacking)
+    const boxDepth = 0.25;
+    const boxY = horizon + (h - horizon) * boxDepth;
+    const boxBottomY = horizon + (h - horizon) * 0.45;
+    const boxWidthTop = farWidth + (nearWidth - farWidth) * boxDepth;
+    const boxWidthBottom = farWidth + (nearWidth - farWidth) * 0.45;
+    const boxHalfTop = boxWidthTop * 0.4;
+    const boxHalfBottom = boxWidthBottom * 0.4;
+
+    ctx.beginPath();
+    // Top of box
+    ctx.moveTo(w/2 - boxHalfTop, boxY);
+    ctx.lineTo(w/2 + boxHalfTop, boxY);
+    // Sides
+    ctx.moveTo(w/2 - boxHalfTop, boxY);
+    ctx.lineTo(w/2 - boxHalfBottom, boxBottomY);
+    ctx.moveTo(w/2 + boxHalfTop, boxY);
+    ctx.lineTo(w/2 + boxHalfBottom, boxBottomY);
+    // Bottom of box
+    ctx.moveTo(w/2 - boxHalfBottom, boxBottomY);
+    ctx.lineTo(w/2 + boxHalfBottom, boxBottomY);
+    ctx.stroke();
+
+    // Goal at the far end
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 3;
+    const goalY = horizon + 8;
+    const goalWidth = farWidth * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(w/2 - goalWidth/2, goalY);
+    ctx.lineTo(w/2 + goalWidth/2, goalY);
+    ctx.stroke();
+
+    // Sort players by distance (far first)
+    const sortedPlayers = [...actualPlayers].sort((a, b) => a.y - b.y);
+
+    // Draw each player
+    for (const p of sortedPlayers) {
+        draw3DPlayerDirect(p, horizon, nearWidth, farWidth, farY, nearY);
+    }
 }
 
-function draw3DPlayerDirect(player) {
+function draw3DPlayerDirect(player, horizon, nearWidth, farWidth, farY, nearY) {
     const w = canvas.width;
     const h = canvas.height;
-    const horizon = h * 0.35;
 
-    // Calculate how far "forward" the player is from viewer
-    // Viewer looks toward top of screen (lower Y values)
+    // Calculate depth (0 = at horizon/far, 1 = at bottom/near)
     const forwardDist = viewerPosition.y - player.y;
-    const sideDist = player.x - viewerPosition.x;
+    const maxDist = viewerPosition.y - 15;
+    const depth = Math.max(0.05, Math.min(0.95, forwardDist / maxDist));
 
-    // Skip if behind viewer
-    if (forwardDist < 10) return;
+    // Screen Y position
+    const screenY = horizon + (nearY - horizon) * depth;
 
-    // Convert to screen position
-    // Far away (large forwardDist) = near horizon, small size
-    // Close (small forwardDist) = near bottom, large size
-    const maxDist = viewerPosition.y - 15; // Max possible forward distance
-    const t = Math.min(forwardDist / maxDist, 1); // 0 = close, 1 = far
+    // Width of field at this depth
+    const fieldWidthAtDepth = farWidth + (nearWidth - farWidth) * depth;
+    const fieldLeftAtDepth = (w - fieldWidthAtDepth) / 2;
 
-    // Screen Y: interpolate from bottom to horizon
-    const screenY = horizon + (h - horizon - 20) * (1 - t);
+    // Player's X position relative to field center
+    const relativeX = (player.x - viewerPosition.x) / 150;  // Normalize
+    const screenX = w / 2 + relativeX * (fieldWidthAtDepth / 2);
 
-    // Screen X: side position, compressed when far
-    const compression = 0.3 + 0.7 * (1 - t);
-    const screenX = w / 2 + sideDist * compression * 1.5;
-
-    // Size: bigger when close
-    const size = 15 + 35 * (1 - t);
+    // Size based on depth (closer = bigger)
+    const size = 12 + 40 * depth;
 
     // Draw shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
     ctx.beginPath();
-    ctx.ellipse(screenX, screenY + 3, size * 0.6, size * 0.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(screenX, screenY, size * 0.5, size * 0.15, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Draw body (oval)
+    // Draw legs
+    ctx.fillStyle = '#222';
+    const legH = size * 0.4;
+    ctx.fillRect(screenX - size * 0.15, screenY - legH, size * 0.12, legH);
+    ctx.fillRect(screenX + size * 0.03, screenY - legH, size * 0.12, legH);
+
+    // Draw body/jersey
     ctx.fillStyle = player.team === 'A' ? '#e63946' : '#87CEEB';
     ctx.beginPath();
-    ctx.ellipse(screenX, screenY - size * 0.5, size * 0.4, size * 0.6, 0, 0, Math.PI * 2);
+    ctx.ellipse(screenX, screenY - size * 0.65, size * 0.3, size * 0.35, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Border for Soleil
     if (player.team === 'B') {
         ctx.strokeStyle = '#1e3a5f';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = Math.max(1, size * 0.05);
         ctx.stroke();
     }
 
     // Draw head
     ctx.fillStyle = '#f0c8b8';
     ctx.beginPath();
-    ctx.arc(screenX, screenY - size * 1.1, size * 0.25, 0, Math.PI * 2);
+    ctx.arc(screenX, screenY - size * 1.05, size * 0.2, 0, Math.PI * 2);
     ctx.fill();
 
-    // Number
-    if (size > 20) {
+    // Hair
+    ctx.fillStyle = '#3a2a1a';
+    ctx.beginPath();
+    ctx.arc(screenX, screenY - size * 1.1, size * 0.17, Math.PI, 0, false);
+    ctx.fill();
+
+    // Number on jersey
+    if (size > 25) {
         ctx.fillStyle = player.team === 'A' ? 'white' : '#1e3a5f';
-        ctx.font = `bold ${Math.floor(size * 0.35)}px Arial`;
+        ctx.font = `bold ${Math.max(10, Math.floor(size * 0.3))}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(player.number.toString(), screenX, screenY - size * 0.5);
+        ctx.fillText(player.number.toString(), screenX, screenY - size * 0.65);
     }
 }
 
