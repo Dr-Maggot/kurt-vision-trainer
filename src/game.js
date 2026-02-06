@@ -331,116 +331,117 @@ const PLAYER_POSITIONS = [
 function draw3DView() {
     const w = canvas.width;
     const h = canvas.height;
-    const horizon = h * 0.38;
+    const horizon = h * 0.35;
 
     // Sky
-    ctx.fillStyle = '#5a9fd4';
+    ctx.fillStyle = '#6aaddb';
     ctx.fillRect(0, 0, w, horizon);
 
-    // Grass - simple gradient
-    const grassGrad = ctx.createLinearGradient(0, horizon, 0, h);
-    grassGrad.addColorStop(0, '#1e6b35');
-    grassGrad.addColorStop(1, '#2d9a4e');
-    ctx.fillStyle = grassGrad;
+    // Grass
+    ctx.fillStyle = '#2d8a4e';
     ctx.fillRect(0, horizon, w, h - horizon);
 
-    // Draw field markings
-    draw3DFieldLines();
+    // Simple perspective lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 2;
 
-    // Draw players
-    const playersWithScreen = [];
+    // Sidelines converging to center
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    ctx.lineTo(w / 2, horizon);
+    ctx.moveTo(w, h);
+    ctx.lineTo(w / 2, horizon);
+    ctx.stroke();
+
+    // Horizontal depth lines
+    for (let i = 1; i <= 5; i++) {
+        const t = i / 6;
+        const y = horizon + (h - horizon) * t;
+        const spread = t;
+        ctx.beginPath();
+        ctx.moveTo(w / 2 - w * 0.5 * spread, y);
+        ctx.lineTo(w / 2 + w * 0.5 * spread, y);
+        ctx.stroke();
+    }
+
+    // Draw each player directly
     for (const p of actualPlayers) {
-        const screen = worldTo3DScreen(p.x, p.y);
-        if (screen.valid) {
-            playersWithScreen.push({ ...p, screen });
-        }
+        draw3DPlayerDirect(p);
     }
 
-    // Sort far to near
-    playersWithScreen.sort((a, b) => b.screen.dist - a.screen.dist);
-
-    for (const player of playersWithScreen) {
-        draw3DPlayer(player);
-    }
+    // Debug: show player count
+    ctx.fillStyle = 'white';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`Players: ${actualPlayers.length}`, 10, h - 10);
 }
 
-function worldTo3DScreen(worldX, worldY) {
+function draw3DPlayerDirect(player) {
     const w = canvas.width;
     const h = canvas.height;
-    const horizon = h * 0.38;
+    const horizon = h * 0.35;
 
-    // Distance from viewer (viewer looks toward negative Y = top of field)
-    const forward = viewerPosition.y - worldY;
-    const right = worldX - viewerPosition.x;
+    // Calculate how far "forward" the player is from viewer
+    // Viewer looks toward top of screen (lower Y values)
+    const forwardDist = viewerPosition.y - player.y;
+    const sideDist = player.x - viewerPosition.x;
 
-    // Only show things in front
-    if (forward < 20) {
-        return { x: 0, y: 0, valid: false, size: 0, dist: 0 };
-    }
+    // Skip if behind viewer
+    if (forwardDist < 10) return;
 
-    // Simple perspective: farther = closer to horizon, nearer = lower on screen
-    const maxDist = 300;
-    const distRatio = Math.min(forward / maxDist, 1);
+    // Convert to screen position
+    // Far away (large forwardDist) = near horizon, small size
+    // Close (small forwardDist) = near bottom, large size
+    const maxDist = viewerPosition.y - 15; // Max possible forward distance
+    const t = Math.min(forwardDist / maxDist, 1); // 0 = close, 1 = far
 
-    // Y position: lerp from bottom of screen (near) to horizon (far)
-    const screenY = h - (h - horizon) * (1 - distRatio * 0.9);
+    // Screen Y: interpolate from bottom to horizon
+    const screenY = horizon + (h - horizon - 20) * (1 - t);
 
-    // X position: spread based on distance
-    const spreadFactor = 1 - distRatio * 0.6;
-    const screenX = w / 2 + right * spreadFactor * 2;
+    // Screen X: side position, compressed when far
+    const compression = 0.3 + 0.7 * (1 - t);
+    const screenX = w / 2 + sideDist * compression * 1.5;
 
     // Size: bigger when close
-    const size = Math.max(10, 50 * (1 - distRatio * 0.7));
+    const size = 15 + 35 * (1 - t);
 
-    return { x: screenX, y: screenY, valid: true, size, dist: forward };
+    // Draw shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(screenX, screenY + 3, size * 0.6, size * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw body (oval)
+    ctx.fillStyle = player.team === 'A' ? '#e63946' : '#87CEEB';
+    ctx.beginPath();
+    ctx.ellipse(screenX, screenY - size * 0.5, size * 0.4, size * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Border for Soleil
+    if (player.team === 'B') {
+        ctx.strokeStyle = '#1e3a5f';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    // Draw head
+    ctx.fillStyle = '#f0c8b8';
+    ctx.beginPath();
+    ctx.arc(screenX, screenY - size * 1.1, size * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Number
+    if (size > 20) {
+        ctx.fillStyle = player.team === 'A' ? 'white' : '#1e3a5f';
+        ctx.font = `bold ${Math.floor(size * 0.35)}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(player.number.toString(), screenX, screenY - size * 0.5);
+    }
 }
 
 function draw3DFieldLines() {
-    const w = canvas.width;
-    const h = canvas.height;
-    const horizon = h * 0.38;
-    const margin = 15;
-
-    const fieldTop = margin;
-    const fieldBottom = h - margin;
-    const fieldLeft = margin;
-    const fieldRight = w - margin;
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-    ctx.lineWidth = 2;
-
-    // Draw horizontal lines at different depths
-    const lines = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0];
-
-    for (const t of lines) {
-        const worldY = fieldTop + (viewerPosition.y - fieldTop) * (1 - t);
-        const p1 = worldTo3DScreen(fieldLeft, worldY);
-        const p2 = worldTo3DScreen(fieldRight, worldY);
-
-        if (p1.valid && p2.valid) {
-            ctx.lineWidth = Math.max(1, 3 - t * 2);
-            ctx.beginPath();
-            ctx.moveTo(p1.x, p1.y);
-            ctx.lineTo(p2.x, p2.y);
-            ctx.stroke();
-        }
-    }
-
-    // Draw sidelines (converging to horizon)
-    ctx.beginPath();
-    ctx.moveTo(fieldLeft, h - 10);
-    ctx.lineTo(w / 2 - 20, horizon + 5);
-    ctx.moveTo(fieldRight, h - 10);
-    ctx.lineTo(w / 2 + 20, horizon + 5);
-    ctx.stroke();
-
-    // Center circle hint
-    const centerScreen = worldTo3DScreen(w / 2, h / 2);
-    if (centerScreen.valid) {
-        ctx.beginPath();
-        ctx.arc(centerScreen.x, centerScreen.y, centerScreen.size * 2, 0, Math.PI * 2);
-        ctx.stroke();
-    }
+    // Field lines are now drawn in draw3DView
 }
 
 function worldTo3DScreen(worldX, worldY) {
@@ -777,63 +778,61 @@ function setupVisionGame() {
     // Generate players IN FRONT of viewer (toward goal = lower Y values)
     const numPerTeam = 2 + Math.floor(level / 2);
     actualPlayers = [];
-    const minDist = 40;
+
+    // Available space in front of viewer
+    const minY = fieldTop + 30;
+    const maxY = viewerPosition.y - 40;
+    const yRange = maxY - minY;
+
+    // If not enough room, adjust viewer position
+    if (yRange < 50) {
+        viewerPosition.y = fieldBottom - 50;
+    }
 
     for (let i = 0; i < numPerTeam * 2; i++) {
-        let attempts = 0;
-        let x, y, valid;
         const team = i < numPerTeam ? 'A' : 'B';
         const number = i < numPerTeam ? i + 1 : i - numPerTeam + 1;
 
-        do {
-            valid = true;
+        // Distribute players across the visible area
+        const row = Math.floor(i / 3);
+        const col = i % 3;
 
-            // Place players between viewer and the goal (top of field)
-            // Forward distance (toward goal)
-            const forwardDist = 40 + Math.random() * 150;
-            // Side spread
-            const sideSpread = (Math.random() - 0.5) * 200;
+        // Y position: spread from near to far
+        const yT = 0.2 + (row * 0.3) + Math.random() * 0.2;
+        const y = minY + (viewerPosition.y - 50 - minY) * yT;
 
-            x = viewerPosition.x + sideSpread;
-            y = viewerPosition.y - forwardDist;  // Negative Y = toward goal
+        // X position: spread across width
+        const xSpread = fieldWidth * 0.7;
+        const x = viewerPosition.x + (col - 1) * (xSpread / 2) + (Math.random() - 0.5) * 40;
 
-            // Keep within field
-            if (x < fieldLeft + 25 || x > fieldRight - 25 ||
-                y < fieldTop + 25 || y > viewerPosition.y - 30) {
-                valid = false;
-            }
+        // Clamp to field bounds
+        const clampedX = Math.max(fieldLeft + 30, Math.min(fieldRight - 30, x));
+        const clampedY = Math.max(minY, Math.min(viewerPosition.y - 40, y));
 
-            // Check distance from other players
-            for (const p of actualPlayers) {
-                const dist = Math.sqrt((p.x - x) ** 2 + (p.y - y) ** 2);
-                if (dist < minDist) valid = false;
-            }
-
-            attempts++;
-        } while (!valid && attempts < 80);
-
-        if (valid) {
-            actualPlayers.push({ x, y, team, number });
-        }
+        actualPlayers.push({ x: clampedX, y: clampedY, team, number });
     }
 
     placedPlayers = [];
     gamePhase = 'viewing';
 
+    // Debug: log player positions
+    console.log('Viewer at:', viewerPosition);
+    console.log('Players:', actualPlayers.map(p => ({ x: p.x, y: p.y, team: p.team })));
+
     // Draw 3D view
     draw3DView();
 
     // Position label
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(0, 0, w, 28);
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, w, 30);
     ctx.fillStyle = 'white';
     ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(`YOUR VIEW: ${pos.name}`, w / 2, 18);
+    ctx.fillText(`YOUR VIEW: ${pos.name} | Viewer: (${Math.round(viewerPosition.x)}, ${Math.round(viewerPosition.y)})`, w / 2, 20);
 
     const numRed = actualPlayers.filter(p => p.team === 'A').length;
     const numBlue = actualPlayers.filter(p => p.team === 'B').length;
-    showMessage(`Study: ${numRed} RED, ${numBlue} BLUE (Soleil)`);
+    showMessage(`Find ${numRed} RED + ${numBlue} BLUE players`);
     updatePlacementCount();
 
     const viewTime = Math.max(5000 - level * 400, 2500);
