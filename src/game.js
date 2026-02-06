@@ -316,50 +316,50 @@ function drawGhostPlayer(x, y, team) {
 
 // ============ 3D FIRST-PERSON RENDERING ============
 
-// Striker/Midfielder starting positions
-// x, y are normalized 0-1 on field, lookY is where they look (0=top of field, 1=bottom)
+// Striker/Midfielder starting positions (normalized 0-1)
 const PLAYER_POSITIONS = [
-    { x: 0.5, y: 0.65, lookY: 0.1, name: 'Central striker' },
-    { x: 0.3, y: 0.6, lookY: 0.15, name: 'Left wing' },
-    { x: 0.7, y: 0.6, lookY: 0.15, name: 'Right wing' },
-    { x: 0.5, y: 0.5, lookY: 0.1, name: 'Attacking mid' },
-    { x: 0.35, y: 0.45, lookY: 0.1, name: 'Left mid' },
-    { x: 0.65, y: 0.45, lookY: 0.1, name: 'Right mid' },
-    { x: 0.4, y: 0.7, lookY: 0.2, name: 'Left edge of box' },
-    { x: 0.6, y: 0.7, lookY: 0.2, name: 'Right edge of box' },
-    { x: 0.5, y: 0.35, lookY: 0.05, name: 'Center circle' },
+    { x: 0.5, y: 0.7, name: 'Central striker' },
+    { x: 0.3, y: 0.65, name: 'Left wing' },
+    { x: 0.7, y: 0.65, name: 'Right wing' },
+    { x: 0.5, y: 0.55, name: 'Attacking mid' },
+    { x: 0.35, y: 0.5, name: 'Left mid' },
+    { x: 0.65, y: 0.5, name: 'Right mid' },
+    { x: 0.4, y: 0.75, name: 'Left edge of box' },
+    { x: 0.6, y: 0.75, name: 'Right edge of box' },
 ];
 
 function draw3DView() {
     const w = canvas.width;
     const h = canvas.height;
-    const horizon = h * 0.35;
+    const horizon = h * 0.38;
 
     // Sky
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, horizon);
-    skyGrad.addColorStop(0, '#4a90d9');
-    skyGrad.addColorStop(1, '#87CEEB');
-    ctx.fillStyle = skyGrad;
+    ctx.fillStyle = '#5a9fd4';
     ctx.fillRect(0, 0, w, horizon);
 
-    // Grass
+    // Grass - simple gradient
     const grassGrad = ctx.createLinearGradient(0, horizon, 0, h);
-    grassGrad.addColorStop(0, '#1a5c2e');
-    grassGrad.addColorStop(0.4, '#2d8a4e');
-    grassGrad.addColorStop(1, '#3da55d');
+    grassGrad.addColorStop(0, '#1e6b35');
+    grassGrad.addColorStop(1, '#2d9a4e');
     ctx.fillStyle = grassGrad;
     ctx.fillRect(0, horizon, w, h - horizon);
 
-    // Draw field lines
+    // Draw field markings
     draw3DFieldLines();
 
-    // Draw players (sorted far to near)
-    const playersWithDepth = actualPlayers.map(p => {
+    // Draw players
+    const playersWithScreen = [];
+    for (const p of actualPlayers) {
         const screen = worldTo3DScreen(p.x, p.y);
-        return { ...p, screen };
-    }).filter(p => p.screen.valid).sort((a, b) => b.screen.depth - a.screen.depth);
+        if (screen.valid) {
+            playersWithScreen.push({ ...p, screen });
+        }
+    }
 
-    for (const player of playersWithDepth) {
+    // Sort far to near
+    playersWithScreen.sort((a, b) => b.screen.dist - a.screen.dist);
+
+    for (const player of playersWithScreen) {
         draw3DPlayer(player);
     }
 }
@@ -367,119 +367,79 @@ function draw3DView() {
 function worldTo3DScreen(worldX, worldY) {
     const w = canvas.width;
     const h = canvas.height;
-    const horizon = h * 0.35;
+    const horizon = h * 0.38;
 
-    // Vector from viewer to point
-    const dx = worldX - viewerPosition.x;
-    const dy = worldY - viewerPosition.y;
+    // Distance from viewer (viewer looks toward negative Y = top of field)
+    const forward = viewerPosition.y - worldY;
+    const right = worldX - viewerPosition.x;
 
-    // Distance forward (toward where viewer is looking = negative Y direction in canvas)
-    // viewerAngle represents the Y coordinate the viewer is looking at
-    // "Forward" means toward lower Y values (toward goal at top)
-    const forward = viewerPosition.y - worldY;  // Positive = in front of viewer
-    const right = worldX - viewerPosition.x;     // Positive = to the right
-
-    if (forward < 10) {
-        return { x: 0, y: 0, valid: false, size: 0, depth: forward };
+    // Only show things in front
+    if (forward < 20) {
+        return { x: 0, y: 0, valid: false, size: 0, dist: 0 };
     }
 
-    // Perspective projection
-    const focalLength = 250;
-    const screenX = w / 2 + (right / forward) * focalLength;
-    const screenY = horizon + (40 / forward) * focalLength;  // 40 = eye height feel
+    // Simple perspective: farther = closer to horizon, nearer = lower on screen
+    const maxDist = 300;
+    const distRatio = Math.min(forward / maxDist, 1);
 
-    // Size based on distance
-    const size = Math.max(8, 200 / forward);
+    // Y position: lerp from bottom of screen (near) to horizon (far)
+    const screenY = h - (h - horizon) * (1 - distRatio * 0.9);
 
-    return { x: screenX, y: screenY, valid: true, size, depth: forward };
+    // X position: spread based on distance
+    const spreadFactor = 1 - distRatio * 0.6;
+    const screenX = w / 2 + right * spreadFactor * 2;
+
+    // Size: bigger when close
+    const size = Math.max(10, 50 * (1 - distRatio * 0.7));
+
+    return { x: screenX, y: screenY, valid: true, size, dist: forward };
 }
 
 function draw3DFieldLines() {
     const w = canvas.width;
     const h = canvas.height;
+    const horizon = h * 0.38;
     const margin = 15;
 
-    const fieldLeft = margin;
-    const fieldRight = w - margin;
     const fieldTop = margin;
     const fieldBottom = h - margin;
-    const fieldWidth = fieldRight - fieldLeft;
-    const fieldHeight = fieldBottom - fieldTop;
-    const centerX = w / 2;
-    const centerY = h / 2;
+    const fieldLeft = margin;
+    const fieldRight = w - margin;
 
-    const penaltyW = fieldWidth * 0.16;
-    const penaltyH = fieldHeight * 0.45;
-    const penaltyTop = (h - penaltyH) / 2;
-    const penaltyBottom = penaltyTop + penaltyH;
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 2;
 
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    // Draw horizontal lines at different depths
+    const lines = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0];
 
-    function draw3DLine(x1, y1, x2, y2) {
-        const p1 = worldTo3DScreen(x1, y1);
-        const p2 = worldTo3DScreen(x2, y2);
+    for (const t of lines) {
+        const worldY = fieldTop + (viewerPosition.y - fieldTop) * (1 - t);
+        const p1 = worldTo3DScreen(fieldLeft, worldY);
+        const p2 = worldTo3DScreen(fieldRight, worldY);
 
-        if (!p1.valid || !p2.valid) return;
-
-        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-        ctx.lineWidth = Math.max(1.5, 5 - Math.min(p1.depth, p2.depth) / 50);
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-    }
-
-    function draw3DCircle(cx, cy, radius) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-        ctx.beginPath();
-        let started = false;
-
-        for (let a = 0; a <= Math.PI * 2 + 0.1; a += Math.PI / 20) {
-            const px = cx + Math.cos(a) * radius;
-            const py = cy + Math.sin(a) * radius;
-            const p = worldTo3DScreen(px, py);
-
-            if (p.valid) {
-                ctx.lineWidth = Math.max(1.5, 5 - p.depth / 50);
-                if (!started) {
-                    ctx.moveTo(p.x, p.y);
-                    started = true;
-                } else {
-                    ctx.lineTo(p.x, p.y);
-                }
-            }
+        if (p1.valid && p2.valid) {
+            ctx.lineWidth = Math.max(1, 3 - t * 2);
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
         }
-        ctx.stroke();
     }
 
-    // Field boundary
-    draw3DLine(fieldLeft, fieldTop, fieldRight, fieldTop);
-    draw3DLine(fieldRight, fieldTop, fieldRight, fieldBottom);
-    draw3DLine(fieldRight, fieldBottom, fieldLeft, fieldBottom);
-    draw3DLine(fieldLeft, fieldBottom, fieldLeft, fieldTop);
+    // Draw sidelines (converging to horizon)
+    ctx.beginPath();
+    ctx.moveTo(fieldLeft, h - 10);
+    ctx.lineTo(w / 2 - 20, horizon + 5);
+    ctx.moveTo(fieldRight, h - 10);
+    ctx.lineTo(w / 2 + 20, horizon + 5);
+    ctx.stroke();
 
-    // Center line (horizontal)
-    draw3DLine(fieldLeft, centerY, fieldRight, centerY);
-
-    // Center circle
-    const centerRadius = Math.min(fieldWidth, fieldHeight) * 0.12;
-    draw3DCircle(centerX, centerY, centerRadius);
-
-    // Left penalty area (goal at top-left)
-    draw3DLine(fieldLeft, penaltyTop, fieldLeft + penaltyW, penaltyTop);
-    draw3DLine(fieldLeft + penaltyW, penaltyTop, fieldLeft + penaltyW, penaltyBottom);
-    draw3DLine(fieldLeft + penaltyW, penaltyBottom, fieldLeft, penaltyBottom);
-
-    // Right penalty area
-    draw3DLine(fieldRight, penaltyTop, fieldRight - penaltyW, penaltyTop);
-    draw3DLine(fieldRight - penaltyW, penaltyTop, fieldRight - penaltyW, penaltyBottom);
-    draw3DLine(fieldRight - penaltyW, penaltyBottom, fieldRight, penaltyBottom);
-
-    // Extra depth lines
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-    for (let y = fieldTop + fieldHeight * 0.25; y < fieldBottom; y += fieldHeight * 0.25) {
-        draw3DLine(fieldLeft, y, fieldRight, y);
+    // Center circle hint
+    const centerScreen = worldTo3DScreen(w / 2, h / 2);
+    if (centerScreen.valid) {
+        ctx.beginPath();
+        ctx.arc(centerScreen.x, centerScreen.y, centerScreen.size * 2, 0, Math.PI * 2);
+        ctx.stroke();
     }
 }
 
@@ -527,52 +487,50 @@ function draw3DPlayer(player) {
 
     // Shadow
     ctx.beginPath();
-    ctx.ellipse(x, y + 2, size * 0.5, size * 0.15, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.ellipse(x, y + size * 0.1, size * 0.6, size * 0.2, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
     ctx.fill();
 
-    const bodyHeight = size * 2;
-    const bodyWidth = size * 0.7;
+    // Simple player figure
+    const bodyH = size * 1.8;
 
     // Legs
-    ctx.fillStyle = player.team === 'A' ? '#2a2a2a' : COLORS.teamBDark;
-    ctx.fillRect(x - bodyWidth * 0.3, y - bodyHeight * 0.35, bodyWidth * 0.25, bodyHeight * 0.35);
-    ctx.fillRect(x + bodyWidth * 0.05, y - bodyHeight * 0.35, bodyWidth * 0.25, bodyHeight * 0.35);
+    ctx.fillStyle = '#222';
+    ctx.fillRect(x - size * 0.25, y - bodyH * 0.3, size * 0.2, bodyH * 0.3);
+    ctx.fillRect(x + size * 0.05, y - bodyH * 0.3, size * 0.2, bodyH * 0.3);
 
-    // Torso (jersey)
+    // Body/Jersey
     ctx.fillStyle = player.team === 'A' ? COLORS.teamA : COLORS.teamB;
     ctx.beginPath();
-    ctx.ellipse(x, y - bodyHeight * 0.55, bodyWidth * 0.45, bodyHeight * 0.22, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y - bodyH * 0.5, size * 0.4, bodyH * 0.25, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Soleil collar detail
+    // Jersey border for Soleil
     if (player.team === 'B') {
-        ctx.fillStyle = COLORS.teamBDark;
-        ctx.beginPath();
-        ctx.ellipse(x, y - bodyHeight * 0.7, bodyWidth * 0.2, bodyHeight * 0.06, 0, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.strokeStyle = COLORS.teamBDark;
+        ctx.lineWidth = 2;
+        ctx.stroke();
     }
 
     // Head
-    const headRadius = size * 0.3;
     ctx.beginPath();
-    ctx.arc(x, y - bodyHeight * 0.82, headRadius, 0, Math.PI * 2);
-    ctx.fillStyle = '#f0c8b8';
+    ctx.arc(x, y - bodyH * 0.78, size * 0.25, 0, Math.PI * 2);
+    ctx.fillStyle = '#e8c4b0';
     ctx.fill();
 
     // Hair
-    ctx.fillStyle = player.team === 'A' ? '#3a2a1a' : '#5a4a3a';
     ctx.beginPath();
-    ctx.arc(x, y - bodyHeight * 0.85, headRadius * 0.85, Math.PI, 0, false);
+    ctx.arc(x, y - bodyH * 0.82, size * 0.22, Math.PI, 0, false);
+    ctx.fillStyle = player.team === 'A' ? '#2a1a0a' : '#4a3a2a';
     ctx.fill();
 
-    // Jersey number
-    if (player.number && size > 12) {
+    // Number on jersey
+    if (player.number && size > 15) {
         ctx.fillStyle = player.team === 'A' ? 'white' : COLORS.teamBDark;
-        ctx.font = `bold ${Math.max(10, size * 0.45)}px Arial`;
+        ctx.font = `bold ${Math.max(9, size * 0.4)}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(player.number.toString(), x, y - bodyHeight * 0.55);
+        ctx.fillText(player.number.toString(), x, y - bodyH * 0.5);
     }
 }
 
@@ -1116,22 +1074,31 @@ function setupSiuuuGame() {
     gamePhase = 'playing';
     drawSiuuuScene();
 
-    showMessage('Tap at the right moment! Get ready...');
+    showMessage('Press SPACEBAR when the bar hits the green zone!');
+
+    // Add keyboard listener
+    document.addEventListener('keydown', handleSiuuuKey);
+    canvas.onclick = handleSiuuuTap;
 
     // Start the sequence after a delay
     setTimeout(() => {
         if (!gameActive) return;
         startSiuuuSequence();
-    }, 1500);
+    }, 2000);
+}
 
-    canvas.onclick = handleSiuuuTap;
+function handleSiuuuKey(e) {
+    if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        handleSiuuuTap();
+    }
 }
 
 function startSiuuuSequence() {
     siuuuState.phase = 'jumping';
     siuuuState.timing = 0;
-    siuuuState.targetTime = 30;  // Frames to hit jump
-    showMessage('TAP to JUMP!');
+    siuuuState.targetTime = 30;
+    showMessage('SPACE to JUMP!');
     animateSiuuu();
 }
 
@@ -1148,7 +1115,7 @@ function handleSiuuuTap() {
             siuuuState.phase = 'spinning';
             siuuuState.timing = 0;
             siuuuState.targetTime = 40;
-            showMessage('TAP to SPIN!');
+            showMessage('SPACE to SPIN!');
         } else {
             failSiuuu('jump');
         }
@@ -1158,7 +1125,7 @@ function handleSiuuuTap() {
             siuuuState.phase = 'landing';
             siuuuState.timing = 0;
             siuuuState.targetTime = 35;
-            showMessage('TAP to LAND!');
+            showMessage('SPACE to LAND!');
         } else {
             failSiuuu('spin');
         }
@@ -1168,7 +1135,7 @@ function handleSiuuuTap() {
             siuuuState.phase = 'siuuu';
             siuuuState.timing = 0;
             siuuuState.targetTime = 25;
-            showMessage('TAP for SIUUUUU!');
+            showMessage('SPACE for SIUUUUU!');
         } else {
             failSiuuu('land');
         }
@@ -1216,6 +1183,8 @@ function successSiuuu() {
 
 function finishSiuuuRound() {
     canvas.onclick = null;
+    document.removeEventListener('keydown', handleSiuuuKey);
+
     if (siuuuState.animationId) {
         cancelAnimationFrame(siuuuState.animationId);
     }
@@ -1445,31 +1414,44 @@ function drawTimingBar() {
 
     if (state.phase === 'done' || state.phase === 'fail' || state.phase === 'ready') return;
 
-    const barW = w * 0.7;
-    const barH = 20;
+    const barW = w * 0.8;
+    const barH = 25;
     const barX = (w - barW) / 2;
-    const barY = h - 60;
+    const barY = h - 70;
 
     // Bar background
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(barX, barY, barW, barH);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(barX, barY, barW, barH);
 
-    // Target zone (green area)
+    // Target zone (green area) - make it more visible
     const targetX = barX + (state.targetTime / 70) * barW;
-    ctx.fillStyle = 'rgba(76, 175, 80, 0.7)';
-    ctx.fillRect(targetX - 15, barY, 30, barH);
+    ctx.fillStyle = '#4CAF50';
+    ctx.fillRect(targetX - 20, barY, 40, barH);
 
-    // Moving indicator
+    // Moving indicator (white bar)
     const indicatorX = barX + (state.timing / 70) * barW;
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(indicatorX - 3, barY - 5, 6, barH + 10);
+    ctx.fillStyle = '#ffff00';
+    ctx.fillRect(indicatorX - 4, barY - 8, 8, barH + 16);
 
-    // Phase label
-    const labels = { jumping: 'JUMP!', spinning: 'SPIN!', landing: 'LAND!', siuuu: 'SIUUUU!' };
+    // Phase label with instruction
+    const labels = {
+        jumping: '>>> PRESS SPACE to JUMP! <<<',
+        spinning: '>>> PRESS SPACE to SPIN! <<<',
+        landing: '>>> PRESS SPACE to LAND! <<<',
+        siuuu: '>>> PRESS SPACE for SIUUUUU! <<<'
+    };
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 18px Arial';
+    ctx.font = 'bold 20px Arial';
     ctx.textAlign = 'center';
     ctx.fillText(labels[state.phase] || '', w / 2, barY - 15);
+
+    // Hint text
+    ctx.font = '12px Arial';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText('Hit SPACE when yellow bar reaches green zone', w / 2, barY + barH + 18);
 }
 
 // ============ GAME FLOW ============
