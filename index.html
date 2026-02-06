@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Kurt's Vision Trainer - Soleil FC</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Welcome Screen -->
+        <div id="welcome-screen" class="screen active">
+            <div id="coach-container">
+                <canvas id="coach-avatar" width="120" height="150"></canvas>
+            </div>
+            <h2 id="welcome-title">Hey Kurt!</h2>
+            <div id="welcome-message"></div>
+            <button class="menu-btn" onclick="showMenu()">
+                <span class="icon">></span>
+                Let's Train!
+            </button>
+            <div id="welcome-scores">
+                <h3>Your Records</h3>
+                <div id="welcome-scores-list"></div>
+            </div>
+        </div>
+
+        <!-- Menu Screen -->
+        <div id="menu-screen" class="screen">
+            <h1>Kurt's Training</h1>
+            <p class="subtitle">Soleil FC Vision Drills</p>
+            <div class="menu-buttons">
+                <button class="menu-btn" onclick="startGame('recall')">
+                    <span class="icon">O</span>
+                    Position Recall
+                    <span class="desc">Remember and recreate all positions</span>
+                </button>
+                <button class="menu-btn" onclick="startGame('vision')">
+                    <span class="icon">^</span>
+                    3D Vision
+                    <span class="desc">Translate player view to bird's eye</span>
+                </button>
+            </div>
+            <div id="high-scores">
+                <h3>Your Best</h3>
+                <div id="scores-list"></div>
+            </div>
+        </div>
+
+        <!-- Game Screen -->
+        <div id="game-screen" class="screen">
+            <div class="game-header">
+                <button class="back-btn" onclick="goToMenu()">←</button>
+                <div class="game-info">
+                    <span id="score">Score: 0</span>
+                    <span id="level">Level 1</span>
+                    <span id="timer">3.0s</span>
+                </div>
+            </div>
+            <div id="field-container">
+                <canvas id="field"></canvas>
+            </div>
+            <div id="game-message"></div>
+            <div id="answer-buttons" class="hidden"></div>
+        </div>
+
+        <!-- Result Screen -->
+        <div id="result-screen" class="screen">
+            <h2 id="result-title">Round Complete!</h2>
+            <div id="result-stats"></div>
+            <button class="menu-btn" onclick="restartGame()">Play Again</button>
+            <button class="menu-btn secondary" onclick="goToMenu()">Menu</button>
+        </div>
+    </div>
+
+    <script src="src/game.js"></script>
+</body>
+</html>
